@@ -1,0 +1,260 @@
+apiVersion: v1
+kind: Secret
+metadata:
+   name: mean-secret
+type: Opaque
+data:
+  username: YWRtaW4tdXNlcg==
+  password: YWRtaW4tcGFzc3dvcmQ=
+  username1: YWRtaW4tdXNlcjE=
+  password1: YWRtaW4tcGFzc3dvcmQx
+  secret: VGhpc2lzbXlzZWNyZXQ=
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mean-cm
+data:
+ dburl: mongo-service
+ dbname: mean-contacts
+ dbparam: ?authSource=admin? 
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+   name: mongo-deployment
+   labels:
+     app: mongo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+        app: mongo
+  template: 
+    metadata:
+      labels:
+        app: mongo
+    spec:
+      volumes:
+         - name: mongohome 
+           persistentVolumeClaim:
+             claimName: mean-pvc1
+         - name: mongoinit
+           persistentVolumeClaim:
+             claimName: mean-pvc2
+         - name: mongodb
+           persistentVolumeClaim:
+             claimName: mean-pvc3
+      containers:
+         - name: mongo
+           image: mongo:latest
+           volumeMounts:
+           - name: mongohome
+             mountPath: /home/mongodb
+           - name: mongoinit
+             mountPath: /docker-entrypoint-initdb.d/
+           - name: mongodb
+             mountPath: /data/db
+           ports:
+             - containerPort: 27017
+           env:
+             - name: MONGO_INITDB_ROOT_USERNAME
+               valueFrom:
+                  secretKeyRef:
+                       name: mean-secret
+                       key: username
+             - name: MONGO_INITDB_ROOT_PASSWORD
+               valueFrom:
+                  secretKeyRef:
+                       name: mean-secret
+                       key: password
+             - name: MONGO_DB_USERNAME
+               valueFrom:
+                  secretKeyRef:
+                       name: mean-secret
+                       key: username1
+             - name: MONGO_DB_PASSWORD
+               valueFrom:
+                  secretKeyRef:
+                       name: mean-secret
+                       key: password1
+             - name: MONGO_DB
+               valueFrom:
+                  configMapKeyRef:
+                        name: mean-cm
+                        key: dbname
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: mongo-service
+spec:
+  selector:
+     app: mongo
+  ports:
+      - protocol: TCP
+        port: 27017
+        targetPort: 27017
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+   name: angular-deployment
+   labels:
+     app: angular
+spec:
+  selector:
+     matchLabels:
+         app: angular
+  replicas: 1
+  template:
+      metadata:
+         labels:
+           app: angular
+      spec:
+        containers:
+            - name: angular
+              image: mean_angular:1.0
+              imagePullPolicy: Never
+              ports:
+                -  containerPort: 4000
+              env:
+               - name: NODE_ENV
+                 value: dev
+                  
+---
+kind: Service
+apiVersion: v1
+metadata: 
+   name:  angular-service
+spec:
+  externalName: angular
+  selector:
+     app: angular
+  ports:
+    - protocol: TCP
+      targetPort: 4000
+      port: 4000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+   name: express-deployment
+   labels:
+      app: express
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+       app: express
+  template:
+      metadata:
+         labels:
+           app: express
+      spec:
+         restartPolicy: Always
+         containers:
+             - name: express
+               image: mean_express:1.0
+               imagePullPolicy: Never
+               ports:
+                 - containerPort: 3000
+               env:
+                 - name: MONGO_DB_USERNAME
+                   valueFrom:
+                      secretKeyRef:
+                           name: mean-secret
+                           key: username
+                 - name: MONGO_DB_PASSWORD
+                   valueFrom:
+                      secretKeyRef:
+                            name: mean-secret
+                            key: password
+                 - name: SECRET
+                   valueFrom:
+                      secretKeyRef:
+                            name: mean-secret
+                            key: secret
+                 - name: MONGO_DB_HOST
+                   valueFrom:
+                      configMapKeyRef:
+                            name: mean-cm
+                            key: dburl 
+                 - name: MONGO_DB_PORT
+                   value:
+                 - name: MONGO_DB_DATABASE
+                   valueFrom:
+                      configMapKeyRef:
+                         name: mean-cm
+                         key: dbname
+                 - name: MONGO_DB_PARAMETERS
+                   valueFrom:
+                      configMapKeyRef:
+                            name: mean-cm
+                            key: dbparam 
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: express-service
+spec:
+   externalName: express
+   selector:
+      app: express
+   ports:
+      - protocol: TCP
+        targetPort: 3000
+        port: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+   name: nginx-deployment
+   labels:
+     app: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+     metadata:
+       labels:
+         app: nginx
+     spec:
+       containers:
+            - name: nginx
+              image: mean_nginx:1.0
+              imagePullPolicy: Never
+              ports:
+                - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  selector:
+    app: nginx
+  type: LoadBalancer
+  ports:
+    - protocol: TCP
+      nodePort: 30000
+      targetPort: 80
+      port: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: "express"
+spec:
+  type: ExternalName
+  externalName: "express-service.default.svc.cluster.local"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: "angular"
+spec:
+  type: ExternalName
+  externalName: "angular-service.default.svc.cluster.local"
